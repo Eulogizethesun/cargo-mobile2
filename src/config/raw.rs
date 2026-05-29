@@ -2,7 +2,7 @@ use super::app;
 #[cfg(target_os = "macos")]
 use crate::apple;
 use crate::{
-    android, open_harmony,
+    android,
     util::cli::{Report, Reportable, TextWrapper},
 };
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,6 @@ pub struct Raw {
     #[cfg(target_os = "macos")]
     pub apple: Option<apple::config::Raw>,
     pub android: Option<android::config::Raw>,
-    pub open_harmony: Option<open_harmony::config::Raw>,
 }
 
 impl Raw {
@@ -90,7 +89,6 @@ impl Raw {
             #[cfg(target_os = "macos")]
             apple: Some(apple),
             android: None,
-            open_harmony: None,
         })
     }
 
@@ -103,7 +101,6 @@ impl Raw {
             #[cfg(target_os = "macos")]
             apple: Some(apple),
             android: None,
-            open_harmony: None,
         })
     }
 

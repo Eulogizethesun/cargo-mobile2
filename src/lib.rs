@@ -10,7 +10,6 @@ pub mod doctor;
 pub mod dot_cargo;
 pub mod env;
 pub mod init;
-pub mod open_harmony;
 mod once_cell_regex;
 pub mod opts;
 pub mod os;
