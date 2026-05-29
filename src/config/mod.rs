@@ -7,7 +7,7 @@ use self::{app::App, raw::*};
 #[cfg(target_os = "macos")]
 use crate::apple;
 use crate::{
-    android, bicycle, open_harmony, templating,
+    android, bicycle, templating,
     util::cli::{Report, Reportable, TextWrapper},
 };
 use serde::Serialize;
@@ -31,8 +31,6 @@ pub enum FromRawError {
     AppleConfigInvalid(apple::config::Error),
     #[error(transparent)]
     AndroidConfigInvalid(android::config::Error),
-    #[error(transparent)]
-    OpenHarmonyConfigInvalid(open_harmony::config::Error),
 }
 
 impl FromRawError {
@@ -42,7 +40,6 @@ impl FromRawError {
             #[cfg(target_os = "macos")]
             Self::AppleConfigInvalid(err) => err.report(msg),
             Self::AndroidConfigInvalid(err) => err.report(msg),
-            Self::OpenHarmonyConfigInvalid(err) => err.report(msg),
         }
     }
 }
@@ -105,7 +102,6 @@ pub struct Config {
     #[cfg(target_os = "macos")]
     apple: apple::config::Config,
     android: android::config::Config,
-    open_harmony: open_harmony::config::Config,
 }
 
 impl Config {
@@ -116,14 +112,11 @@ impl Config {
             .map_err(FromRawError::AppleConfigInvalid)?;
         let android = android::config::Config::from_raw(app.clone(), raw.android)
             .map_err(FromRawError::AndroidConfigInvalid)?;
-        let open_harmony = open_harmony::config::Config::from_raw(app.clone(), raw.open_harmony)
-            .map_err(FromRawError::OpenHarmonyConfigInvalid)?;
         Ok(Self {
             app,
             #[cfg(target_os = "macos")]
             apple,
             android,
-            open_harmony,
         })
     }
 
@@ -183,10 +176,6 @@ impl Config {
 
     pub fn android(&self) -> &android::config::Config {
         &self.android
-    }
-
-    pub fn open_harmony(&self) -> &open_harmony::config::Config {
-        &self.open_harmony
     }
 
     pub fn build_a_bike(&self) -> bicycle::Bicycle {
