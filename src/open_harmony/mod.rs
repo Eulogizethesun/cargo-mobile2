@@ -1,5 +1,6 @@
 #[cfg(feature = "cli")]
 pub mod cli;
+pub mod app;
 pub mod config;
 pub mod device;
 pub mod emulator;

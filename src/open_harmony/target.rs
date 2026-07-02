@@ -196,7 +196,17 @@ impl<'a> Target<'a> {
             cargo_args.push("--no-default-features".into());
         }
 
-        let dist = config.project_dir().join("entry").join("libs");
+        // The Rust `.so` is placed under the active entry module's `libs/` dir,
+        // so hvigor picks it up when packaging that entry HAP. The active entry
+        // is `entry_{OHOS_DEVICE_TYPE}` (mobile/desktop); OHOS_DEVICE_TYPE is set
+        // by the Tauri CLI (build/dev) or baked by the hvigor `tauriPlugin`
+        // (`--open`/IDE path) before this runs.
+        let device_type =
+            std::env::var("OHOS_DEVICE_TYPE").unwrap_or_else(|_| "mobile".to_string());
+        let dist = config
+            .project_dir()
+            .join(format!("entry_{device_type}"))
+            .join("libs");
 
         duct::cmd("ohrs", ["build", "--arch", self.arch])
             .before_spawn(move |cmd| {
