@@ -27,10 +27,18 @@ impl Reportable for HapError {
 }
 
 pub fn haps_paths(config: &Config) -> Vec<PathBuf> {
-    let output_dir = prefix_path(config.project_dir(), "entry/build/default/outputs/default");
+    // The built HAP lives under the active entry module's output dir and is named
+    // after that module: `entry-{form}-default-*.hap`. The active form is driven
+    // by `OHOS_DEVICE_TYPE` (set by the CLI / baked by the `tauriPlugin`).
+    let device_type = std::env::var("OHOS_DEVICE_TYPE").unwrap_or_else(|_| "mobile".to_string());
+    let module = format!("entry_{device_type}");
+    let output_dir = prefix_path(
+        config.project_dir(),
+        format!("{module}/build/default/outputs/default"),
+    );
     vec![
-        output_dir.join("entry-default-signed.hap"),
-        output_dir.join("entry-default-unsigned.hap"),
+        output_dir.join(format!("{module}-default-signed.hap")),
+        output_dir.join(format!("{module}-default-unsigned.hap")),
     ]
 }
 
