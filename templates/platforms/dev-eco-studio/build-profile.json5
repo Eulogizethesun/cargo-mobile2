@@ -26,8 +26,20 @@
   },
   "modules": [
     {
-      "name": "entry",
-      "srcPath": "./entry",
+      "name": "entry_mobile",
+      "srcPath": "./entry_mobile",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "entry_desktop",
+      "srcPath": "./entry_desktop",
       "targets": [
         {
           "name": "default",

@@ -38,6 +38,10 @@ required-features = ["cli"]
 name = "cargo-android"
 required-features = ["cli"]
 
+[[bin]]
+name = "cargo-open-harmony"
+required-features = ["cli"]
+
 [features]
 cli = [
   "home",
