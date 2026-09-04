@@ -10,56 +10,13 @@ use crate::{
     DuctExpressionExt,
 };
 use std::fmt::{self, Display};
+use std::time::Duration;
 use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum AabBuildError {
-    #[error("Failed to build AAB: {0}")]
-    BuildFailed(std::io::Error),
-}
-
-impl Reportable for AabBuildError {
-    fn report(&self) -> Report {
-        match self {
-            Self::BuildFailed(err) => Report::error("Failed to build AAB", err),
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum ApksBuildError {
-    #[error("Failed to clean old APKS: {0}")]
-    CleanFailed(std::io::Error),
-}
-
-impl Reportable for ApksBuildError {
-    fn report(&self) -> Report {
-        match self {
-            Self::CleanFailed(err) => Report::error("Failed to clean old APKS", err),
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum ApkInstallError {
-    #[error("Failed to install APK: {0}")]
-    InstallFailed(#[from] std::io::Error),
-}
-
-impl Reportable for ApkInstallError {
-    fn report(&self) -> Report {
-        match self {
-            Self::InstallFailed(err) => Report::error("Failed to install APK", err),
-        }
-    }
-}
 
 #[derive(Debug, Error)]
 pub enum RunError {
     #[error(transparent)]
     HapError(hap::HapError),
-    #[error(transparent)]
-    ApkInstallFailed(ApkInstallError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -68,7 +25,6 @@ impl Reportable for RunError {
     fn report(&self) -> Report {
         match self {
             Self::HapError(err) => err.report(),
-            Self::ApkInstallFailed(err) => err.report(),
             Self::Io(err) => Report::error("IO error", err),
         }
     }
@@ -137,6 +93,35 @@ impl<'a> Device<'a> {
     }
 
     fn wait_device_boot(&self, env: &Env) {
+        // The Android original bounds each poll with a 3s timeout; `hdc` needs
+        // the same treatment. Every round sleeps too, so a hung or failing
+        // `hdc` can't burn the CPU in a tight loop, and a bounded number of
+        // consecutive failures gives up instead of spinning forever.
+        const HDC_CALL_TIMEOUT: Duration = Duration::from_secs(3);
+        const RETRY_DELAY: Duration = Duration::from_secs(2);
+        const MAX_FAILURES: usize = 10;
+
+        // Polls the boot property once. `Some(booted)` when `hdc` ran within
+        // the timeout and exited cleanly, `None` when it failed or timed out
+        // (the timed-out child is killed so a hung `hdc` doesn't linger).
+        fn poll_boot(cmd: duct::Expression, timeout: Duration) -> Option<bool> {
+            let handle = cmd.start().ok()?;
+            let output = match handle.wait_timeout(timeout) {
+                Ok(Some(output)) => output,
+                Ok(None) | Err(_) => {
+                    let _ = handle.kill();
+                    return None;
+                }
+            };
+            if !output.status.success() {
+                return None;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // `ohos.boot.time.init` only parses as a number once boot finishes.
+            Some(stdout.trim().parse::<usize>().is_ok())
+        }
+
+        let mut failures = 0usize;
         loop {
             let cmd = self
                 .hdc(env)
@@ -146,20 +131,21 @@ impl<'a> Device<'a> {
                     cmd.args(["shell", "param", "get", "ohos.boot.time.init"]);
                     Ok(())
                 });
-            let handle = cmd.start();
-            if let Ok(handle) = handle {
-                if let Ok(output) = handle.wait() {
-                    if output.status.success() {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        if stdout.trim().parse::<usize>().is_ok() {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_secs(2));
+            match poll_boot(cmd, HDC_CALL_TIMEOUT) {
+                Some(true) => break,
+                // Polled fine, but the device is still booting — not a failure.
+                Some(false) => {}
+                None => {
+                    failures += 1;
+                    if failures >= MAX_FAILURES {
+                        log::warn!(
+                            "Failed to detect device boot after {MAX_FAILURES} attempts; continuing anyway"
+                        );
+                        break;
                     }
-                } else {
-                    break;
                 }
             }
+            std::thread::sleep(RETRY_DELAY);
         }
     }
 
@@ -319,12 +305,13 @@ impl<'a> Device<'a> {
     }
 
     pub fn stacktrace(&self, config: &Config, env: &Env) -> Result<(), StacktraceError> {
+        // The `.so` lives under the active entry module's `libs/` dir, where
+        // `ohrs build --dist` put it (`<dist>/<abi>/lib<name>.so`, e.g.
+        // `arm64-v8a`).
         let lib_path = config
-            .project_dir()
-            .join("libs")
-            .join(self.target.arch)
-            .join(config.app().lib_name())
-            .with_extension("so");
+            .so_dist_dir()
+            .join(self.target.abi)
+            .join(config.so_name());
 
         // -x = print and exit
         let hilog_command = hdc::hdc(env, ["-t", &self.id])

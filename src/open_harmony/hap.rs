@@ -28,10 +28,9 @@ impl Reportable for HapError {
 
 pub fn haps_paths(config: &Config) -> Vec<PathBuf> {
     // The built HAP lives under the active entry module's output dir and is named
-    // after that module: `entry-{form}-default-*.hap`. The active form is driven
-    // by `OHOS_DEVICE_TYPE` (set by the CLI / baked by the `tauriPlugin`).
-    let device_type = std::env::var("OHOS_DEVICE_TYPE").unwrap_or_else(|_| "mobile".to_string());
-    let module = format!("entry_{device_type}");
+    // after that module: `entry_{form}-default-*.hap`. The active form is driven
+    // by `OHOS_DEVICE_TYPE` (set by the CLI / baked by the hvigor plugin).
+    let module = config.active_entry_module();
     let output_dir = prefix_path(
         config.project_dir(),
         format!("{module}/build/default/outputs/default"),
@@ -102,7 +101,7 @@ pub mod cli {
 
         let outputs = super::build(config, env, noise_level, profile)?;
 
-        println!("\nFinished building APK(s):");
+        println!("\nFinished building HAP(s):");
         for p in &outputs {
             println!("    {}", p.to_string_lossy().green(),);
         }

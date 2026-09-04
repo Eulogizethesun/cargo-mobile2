@@ -40,12 +40,14 @@ impl CargoMode {
 
 #[derive(Debug, Error)]
 pub enum CompileLibError {
-    #[error("`Failed to run `ohrs {mode}`: {cause}")]
-    OhrsFailed {
+    #[error("Failed to run `cargo {mode}`: {cause}")]
+    CargoFailed {
         mode: CargoMode,
         cause: std::io::Error,
     },
-    #[error("`Failed to write file at {path} : {cause}")]
+    #[error("Failed to run `ohrs build`: {cause}")]
+    OhrsFailed { cause: std::io::Error },
+    #[error("Failed to write file at {path}: {cause}")]
     FileWrite { path: PathBuf, cause: io::Error },
 }
 
@@ -111,7 +113,7 @@ impl<'a> TargetTrait<'a> for Target<'a> {
             targets.insert(
                 "armv7",
                 Target {
-                    triple: "aarch64-unknown-linux-ohos",
+                    triple: "armv7-unknown-linux-ohos",
                     abi: "armeabi-v7a",
                     arch: "arm",
                 },
@@ -167,8 +169,8 @@ impl<'a> Target<'a> {
         profile: Profile,
         mode: CargoMode,
     ) -> Result<(), CompileLibError> {
-        // Force color, since gradle would otherwise give us uncolored output
-        // (which Android Studio makes red, which is extra gross!)
+        // Colorized output is forced when the CLI drives the build directly, so
+        // logs stay readable when piped through hvigor / DevEco Studio.
         let color = if force_color { "always" } else { "auto" };
 
         let mut cargo_args: Vec<String> = vec![
@@ -196,26 +198,35 @@ impl<'a> Target<'a> {
             cargo_args.push("--no-default-features".into());
         }
 
-        // The Rust `.so` is placed under the active entry module's `libs/` dir,
-        // so hvigor picks it up when packaging that entry HAP. The active entry
-        // is `entry_{OHOS_DEVICE_TYPE}` (mobile/desktop); OHOS_DEVICE_TYPE is set
-        // by the Tauri CLI (build/dev) or baked by the hvigor `tauriPlugin`
-        // (`--open`/IDE path) before this runs.
-        let device_type =
-            std::env::var("OHOS_DEVICE_TYPE").unwrap_or_else(|_| "mobile".to_string());
-        let dist = config
-            .project_dir()
-            .join(format!("entry_{device_type}"))
-            .join("libs");
-
-        duct::cmd("ohrs", ["build", "--arch", self.arch])
-            .before_spawn(move |cmd| {
-                cmd.arg("--dist").arg(&dist).arg("--").args(&cargo_args);
-                Ok(())
-            })
-            .vars(env.explicit_env())
-            .run()
-            .map_err(|cause| CompileLibError::OhrsFailed { mode, cause })?;
+        match mode {
+            // `cargo check` only type-checks, so it needs neither the `ohrs`
+            // wrapper's cross env nor a dist dir — the plain target triple is
+            // enough (this mirrors how the Android target runs check).
+            CargoMode::Check => {
+                duct::cmd("cargo", ["check", "--target", self.triple])
+                    .before_spawn(move |cmd| {
+                        cmd.args(&cargo_args);
+                        Ok(())
+                    })
+                    .vars(env.explicit_env())
+                    .run()
+                    .map_err(|cause| CompileLibError::CargoFailed { mode, cause })?;
+            }
+            CargoMode::Build => {
+                // The Rust `.so` is placed under the active entry module's
+                // `libs/` dir, so hvigor picks it up when packaging that
+                // entry HAP; `ohrs` copies it to `<dist>/<abi>/lib<name>.so`.
+                let dist = config.so_dist_dir();
+                duct::cmd("ohrs", ["build", "--arch", self.arch])
+                    .before_spawn(move |cmd| {
+                        cmd.arg("--dist").arg(&dist).arg("--").args(&cargo_args);
+                        Ok(())
+                    })
+                    .vars(env.explicit_env())
+                    .run()
+                    .map_err(|cause| CompileLibError::OhrsFailed { cause })?;
+            }
+        }
 
         Ok(())
     }
