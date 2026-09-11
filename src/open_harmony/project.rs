@@ -70,10 +70,9 @@ impl Reportable for Error {
             Self::DirectoryReadFailed { path, cause } => {
                 Report::error(format!("Failed to read directory at {:?}", path), cause)
             }
-            Self::DirectoryRemoveFailed { path, cause } => Report::error(
-                format!("Failed to remove directory directory at {:?}", path),
-                cause,
-            ),
+            Self::DirectoryRemoveFailed { path, cause } => {
+                Report::error(format!("Failed to remove directory at {:?}", path), cause)
+            }
             Self::AssetDirSymlinkFailed(err) => Report::error(
                 "Asset dir couldn't be symlinked into OpenHarmony project",
                 err,
@@ -114,12 +113,16 @@ pub fn gen(
         src,
         &dest,
         |map| {
+            // `root-dir-rel` is consumed by each entry module's `hvigorfile.ts`.
+            // Both `entry_mobile` and `entry_desktop` sit at the same depth
+            // under the project dir, so the relative path back to the app root
+            // is identical — compute it from `entry_mobile`.
             map.insert(
                 "root-dir-rel",
                 Path::new(&replace_path_separator(
                     util::relativize_path(
                         config.app().root_dir(),
-                        config.project_dir().join("entry"),
+                        config.project_dir().join("entry_mobile"),
                     )
                     .into_os_string(),
                 )),
