@@ -19,6 +19,8 @@ pub enum RunError {
     HapError(hap::HapError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("failed to detect the app process on device after {attempts} attempts; did the app fail to start?")]
+    AppProcessNotFound { attempts: usize },
 }
 
 impl Reportable for RunError {
@@ -26,6 +28,7 @@ impl Reportable for RunError {
         match self {
             Self::HapError(err) => err.report(),
             Self::Io(err) => Report::error("IO error", err),
+            Self::AppProcessNotFound { .. } => Report::error("app process not found", self),
         }
     }
 }
@@ -96,10 +99,14 @@ impl<'a> Device<'a> {
         // The Android original bounds each poll with a 3s timeout; `hdc` needs
         // the same treatment. Every round sleeps too, so a hung or failing
         // `hdc` can't burn the CPU in a tight loop, and a bounded number of
-        // consecutive failures gives up instead of spinning forever.
+        // consecutive failures gives up instead of spinning forever. The
+        // "still booting" branch is bounded separately: a device that never
+        // finishes booting (e.g. a bootlooping image) must not poll forever
+        // either.
         const HDC_CALL_TIMEOUT: Duration = Duration::from_secs(3);
         const RETRY_DELAY: Duration = Duration::from_secs(2);
         const MAX_FAILURES: usize = 10;
+        const MAX_BOOT_POLLS: usize = 30;
 
         // Polls the boot property once. `Some(booted)` when `hdc` ran within
         // the timeout and exited cleanly, `None` when it failed or timed out
@@ -122,6 +129,7 @@ impl<'a> Device<'a> {
         }
 
         let mut failures = 0usize;
+        let mut boot_polls = 0usize;
         loop {
             let cmd = self
                 .hdc(env)
@@ -133,8 +141,17 @@ impl<'a> Device<'a> {
                 });
             match poll_boot(cmd, HDC_CALL_TIMEOUT) {
                 Some(true) => break,
-                // Polled fine, but the device is still booting — not a failure.
-                Some(false) => {}
+                // Polled fine, but the device is still booting — not a
+                // failure, but don't wait for it forever either.
+                Some(false) => {
+                    boot_polls += 1;
+                    if boot_polls >= MAX_BOOT_POLLS {
+                        log::warn!(
+                            "Device still booting after {MAX_BOOT_POLLS} polls; continuing anyway"
+                        );
+                        break;
+                    }
+                }
                 None => {
                     failures += 1;
                     if failures >= MAX_FAILURES {
@@ -269,6 +286,15 @@ impl<'a> Device<'a> {
 
         let _ = self.wake_screen(env);
 
+        // The Android original polls `pidof` without a bound, which leaves
+        // `run` hanging forever when the app fails to start or exits
+        // immediately. Bound it like `wait_device_boot`: each call gets a
+        // timeout (a hung `hdc` is killed), and a cap on failed attempts.
+        const PIDOF_CALL_TIMEOUT: Duration = Duration::from_secs(3);
+        const PIDOF_RETRY_DELAY: Duration = Duration::from_secs(2);
+        const PIDOF_MAX_ATTEMPTS: usize = 10;
+
+        let mut pidof_failures = 0usize;
         let stdout = loop {
             let cmd = duct::cmd(
                 env.toolchains_path().join("hdc"),
@@ -278,12 +304,32 @@ impl<'a> Device<'a> {
             .stderr_capture()
             .stdout_capture();
             let handle = cmd.start()?;
-            if let Ok(out) = handle.wait() {
+            let output = match handle.wait_timeout(PIDOF_CALL_TIMEOUT) {
+                Ok(Some(output)) => Some(output),
+                Ok(None) | Err(_) => {
+                    let _ = handle.kill();
+                    None
+                }
+            };
+            // A clean exit that actually printed a pid means the app is up.
+            // `pidof` prints nothing when no process matches, and `hdc` may
+            // not propagate the non-zero exit code, so require a non-empty
+            // result as well; anything else counts as a failed attempt.
+            if let Some(out) = output {
                 if out.status.success() {
-                    break String::from_utf8_lossy(&out.stdout).into_owned();
+                    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+                    if !text.trim().is_empty() {
+                        break text;
+                    }
                 }
             }
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            pidof_failures += 1;
+            if pidof_failures >= PIDOF_MAX_ATTEMPTS {
+                return Err(RunError::AppProcessNotFound {
+                    attempts: pidof_failures,
+                });
+            }
+            std::thread::sleep(PIDOF_RETRY_DELAY);
         };
         let pid = stdout.trim().to_string();
 
