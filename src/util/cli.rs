@@ -1,6 +1,9 @@
 use colored::Colorize as _;
 use std::fmt::{Debug, Display};
 
+// `interface` is empty without the `cli` feature, in which case this glob
+// re-export has nothing to re-export and rustc flags it as unused.
+#[cfg(feature = "cli")]
 pub use interface::*;
 
 pub static VERSION_SHORT: &str = concat!("v", env!("CARGO_PKG_VERSION"));
