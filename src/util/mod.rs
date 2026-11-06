@@ -698,28 +698,12 @@ pub fn hvigorw(
             .vars(env.explicit_env())
             .dup_stdio()
     } else {
-        let (node_path, hvigorw_script_path, deveco_sdk_home) = if cfg!(target_os = "macos") {
-            (
-                PathBuf::from("/Applications/DevEco-Studio.app/Contents/tools/node/bin/node"),
-                PathBuf::from(
-                    "/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw.js",
-                ),
-                PathBuf::from("/Applications/DevEco-Studio.app/Contents/sdk"),
-            )
-        } else {
-            let dev_eco_studio_install_path = std::env::var("DEV_ECO_STUDIO_INSTALL_PATH")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("C:\\Program Files\\Huawei\\DevEco Studio"));
-            (
-                dev_eco_studio_install_path.join("tools/node/node.exe"),
-                dev_eco_studio_install_path.join("tools/hvigor/bin/hvigorw.js"),
-                dev_eco_studio_install_path.join("sdk"),
-            )
-        };
-        duct::cmd(node_path, [hvigorw_script_path])
+        // `hvigorw` isn't on PATH; run DevEco's bundled `hvigorw.js` with its
+        // bundled Node instead. `DEVECO_SDK_HOME` is already exported with the
+        // correct SDK root by `Env::explicit_env`.
+        duct::cmd(env.hvigor_node_path(), [env.hvigorw_script_path()])
             .dir(project_dir)
             .vars(env.explicit_env())
-            .env("DEVECO_SDK_HOME", deveco_sdk_home)
             .dup_stdio()
     }
 }

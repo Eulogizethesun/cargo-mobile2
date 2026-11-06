@@ -38,16 +38,7 @@ impl Emulator {
             .join("Library")
             .join("Huawei")
             .join("Sdk");
-        let emulator_path = if cfg!(target_os = "macos") {
-            PathBuf::from("/Applications/DevEco-Studio.app/Contents/tools/emulator/Emulator")
-        } else {
-            std::env::var("DEV_ECO_STUDIO_INSTALL_PATH")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("C:\\Program Files\\Huawei\\DevEco Studio"))
-                .join("tools")
-                .join("emulator")
-                .join("Emulator.exe")
-        };
+        let emulator_path = env.emulator_path();
         duct::cmd(emulator_path, ["-hvd", &self.name])
             .before_spawn(move |cmd| {
                 cmd.arg("-path")

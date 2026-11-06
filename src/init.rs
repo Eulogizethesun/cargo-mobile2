@@ -233,7 +233,7 @@ pub fn exec(
         }
     } else {
         println!(
-                "Skipping OpenHarmony init, since it's marked as unsupported in your Cargo.toml metadata"
+            "Skipping OpenHarmony init, since it's marked as unsupported in your Cargo.toml metadata"
         );
     }
 

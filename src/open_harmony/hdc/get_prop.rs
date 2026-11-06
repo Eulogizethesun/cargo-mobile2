@@ -3,13 +3,14 @@ use crate::{
     util::cli::{Report, Reportable},
 };
 use std::str;
+use std::time::Duration;
 use thiserror::Error;
 
 use super::hdc;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Failed to run `hdc shell getprop {prop}`: {source}")]
+    #[error("Failed to run `hdc shell param get {prop}`: {source}")]
     LookupFailed {
         prop: String,
         source: super::RunCheckedError,
@@ -49,9 +50,18 @@ pub fn get_prop(env: &Env, serial_no: &str, prop: &str) -> Result<String, Error>
         .stderr_capture()
         .start()?;
 
-    let output = handle.wait()?;
-    super::check_authorized(output).map_err(|source| Error::LookupFailed {
-        prop: prop.to_owned(),
-        source,
-    })
+    let output = handle
+        .wait_timeout(Duration::from_secs(3))
+        .and_then(|output| {
+            output.ok_or(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "`hdc shell param get` timed out",
+            ))
+        })?;
+    String::from_utf8(output.stdout.clone())
+        .map(|stdout| stdout.trim().to_string())
+        .map_err(|source| Error::LookupFailed {
+            prop: prop.to_owned(),
+            source: super::RunCheckedError::InvalidUtf8(source),
+        })
 }

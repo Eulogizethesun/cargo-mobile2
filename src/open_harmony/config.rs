@@ -119,7 +119,7 @@ impl Display for ProjectDirInvalid {
             ),
             Self::ContainsSpaces { project_dir } => write!(
                 f,
-                "{:?} contains spaces, which the OpenHarmony is remarkably intolerant of",
+                "{:?} contains spaces, which OpenHarmony does not allow",
                 project_dir
             ),
         }
@@ -216,6 +216,24 @@ impl Config {
 
     pub fn so_name(&self) -> String {
         format!("lib{}.so", self.app().lib_name())
+    }
+
+    /// The active entry module name (`entry_mobile` / `entry_desktop`), driven
+    /// by the `OHOS_DEVICE_TYPE` env var (set by the CLI, or baked by the
+    /// hvigor plugin on the `--open`/IDE build path). Defaults to `mobile`.
+    pub fn active_entry_module(&self) -> String {
+        let device_type =
+            std::env::var("OHOS_DEVICE_TYPE").unwrap_or_else(|_| "mobile".to_string());
+        format!("entry_{device_type}")
+    }
+
+    /// The `libs` dir of the active entry module, where the Rust `.so` is
+    /// distributed (`<project>/entry_{form}/libs`) so hvigor packages it into
+    /// that entry's HAP.
+    pub fn so_dist_dir(&self) -> PathBuf {
+        self.project_dir()
+            .join(self.active_entry_module())
+            .join("libs")
     }
 
     pub fn project_dir(&self) -> PathBuf {

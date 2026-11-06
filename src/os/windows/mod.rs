@@ -154,7 +154,9 @@ pub fn open_file_with(
     // In windows, there is no standerd way to find application by name.
     match application.as_ref().to_str() {
         Some("Android Studio") => open_file_with_android_studio(path, env),
-        Some("DevEco-Studio") => open_file_with_deveco_studio(path, env),
+        // "DevEco Studio" (with a space) is the real application name; the
+        // hyphenated spelling keeps working for callers predating the rename.
+        Some("DevEco Studio") | Some("DevEco-Studio") => open_file_with_deveco_studio(path, env),
         _ => {
             unimplemented!()
         }
@@ -173,6 +175,26 @@ const ANDROID_STUDIO_EXE_PATH: &str = "bin/studio.exe";
 const DEVECO_STUDIO_UNINSTALL_KEY_PATH: PCWSTR =
     w!("SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\DevEco Studio");
 const DEVECO_STUDIO_DISPLAYICON_VALUE: PCWSTR = w!("DisplayIcon");
+
+/// Launches `application_path` with the canonicalized `path` as its only
+/// argument, detached. Shared tail of the IDE-specific open functions.
+fn launch_detached(
+    application_path: impl AsRef<Path>,
+    path: impl AsRef<OsStr>,
+    env: &Env,
+) -> Result<(), OpenFileError> {
+    duct::cmd(
+        application_path.as_ref(),
+        [
+            dunce::canonicalize(Path::new(path.as_ref()))
+                .expect("Failed to canonicalize file path"),
+        ],
+    )
+    .vars(env.explicit_env())
+    .run_and_detach()
+    .map_err(OpenFileError::LaunchFailed)?;
+    Ok(())
+}
 
 fn open_file_with_android_studio(path: impl AsRef<OsStr>, env: &Env) -> Result<(), OpenFileError> {
     let mut application_path = which("studio.cmd").unwrap_or_default();
@@ -196,17 +218,7 @@ fn open_file_with_android_studio(path: impl AsRef<OsStr>, env: &Env) -> Result<(
             .expect("Failed to get Android Studio uninstaller's parent path")
             .join(ANDROID_STUDIO_EXE_PATH);
     }
-    duct::cmd(
-        application_path,
-        [
-            dunce::canonicalize(Path::new(path.as_ref()))
-                .expect("Failed to canonicalize file path"),
-        ],
-    )
-    .vars(env.explicit_env())
-    .run_and_detach()
-    .map_err(OpenFileError::LaunchFailed)?;
-    Ok(())
+    launch_detached(application_path, path, env)
 }
 
 fn open_file_with_deveco_studio(path: impl AsRef<OsStr>, env: &Env) -> Result<(), OpenFileError> {
@@ -228,17 +240,7 @@ fn open_file_with_deveco_studio(path: impl AsRef<OsStr>, env: &Env) -> Result<()
         let displayicon_path = OsString::from_wide(&buffer[..len]);
         application_path = std::path::PathBuf::from(&displayicon_path);
     }
-    duct::cmd(
-        application_path,
-        [
-            dunce::canonicalize(Path::new(path.as_ref()))
-                .expect("Failed to canonicalize file path"),
-        ],
-    )
-    .vars(env.explicit_env())
-    .run_and_detach()
-    .map_err(OpenFileError::LaunchFailed)?;
-    Ok(())
+    launch_detached(application_path, path, env)
 }
 
 pub fn command_path(name: &str) -> std::io::Result<std::process::Output> {
